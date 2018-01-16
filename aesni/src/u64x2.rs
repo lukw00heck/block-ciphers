@@ -8,6 +8,11 @@ pub(crate) struct u64x2(pub u64, pub u64);
 
 const BSWAP_EPI_64: u64x2 = u64x2(0x0001020304050607, 0x08090a0b0c0d0e0f);
 
+#[inline(always)]
+pub(crate) fn xor(a: u64x2, b: u64x2) -> u64x2 {
+    u64x2(a.0 ^ b.0, a.1 ^ b.1)
+}
+
 impl u64x2 {
     /// Reads u64x2 from array pointer (potentially unaligned)
     #[inline(always)]

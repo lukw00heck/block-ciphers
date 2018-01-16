@@ -16,20 +16,20 @@
 //! ```
 //! # use aesni::block_cipher_trait::generic_array::GenericArray;
 //! use aesni::{Aes128, BlockCipher};
-//! 
+//!
 //! let key = GenericArray::from_slice(&[0u8; 16]);
 //! let mut block = GenericArray::clone_from_slice(&[0u8; 16]);
 //! let mut block8 = GenericArray::clone_from_slice(&[block; 8]);
 //! // Initialize cipher
 //! let cipher = aesni::Aes128::new(&key);
-//! 
+//!
 //! let block_copy = block.clone();
 //! // Encrypt block in-place
 //! cipher.encrypt_block(&mut block);
 //! // And decrypt it back
 //! cipher.decrypt_block(&mut block);
 //! assert_eq!(block, block_copy);
-//! 
+//!
 //! // We can encrypt 8 blocks simultaneously using
 //! // instruction-level parallelism
 //! let block8_copy = block8.clone();
@@ -45,15 +45,19 @@
 #![cfg(any(target_arch = "x86_64", target_arch = "x86"))]
 #![no_std]
 #![feature(repr_simd)]
+#![feature(link_llvm_intrinsics)]
+#![feature(simd_ffi)]
 #![feature(asm)]
 pub extern crate block_cipher_trait;
 #[macro_use]
 extern crate opaque_debug;
 
+mod u64x2;
+#[macro_use]
+mod intr;
 mod aes128;
 mod aes192;
 mod aes256;
-mod u64x2;
 mod impl_traits;
 mod ctr;
 

@@ -1,4 +1,5 @@
-use u64x2::u64x2;
+use u64x2::{u64x2, xor};
+use intr;
 
 mod expand;
 
@@ -14,7 +15,7 @@ impl Aes256 {
     #[inline]
     pub fn init(key: &[u8; 32]) -> Self {
         let (encrypt_keys, decrypt_keys) = expand::expand(key);
-        Aes256 { encrypt_keys: encrypt_keys, decrypt_keys: decrypt_keys }
+        Aes256 { encrypt_keys, decrypt_keys }
     }
 
     /// Encrypt in-place one 128 bit block
@@ -29,21 +30,25 @@ impl Aes256 {
     #[inline]
     pub fn decrypt(&self, block: &mut [u8; 16]) {
         let keys = self.decrypt_keys;
-        let mut data = u64x2::read(block);
+        let mut d = u64x2::read(block);
         unsafe {
-            asm!(include_str!("decrypt.asm")
-                : "+{xmm0}"(data)
-                :
-                    "{xmm1}"(keys[14]), "{xmm2}"(keys[13]), "{xmm3}"(keys[12]),
-                    "{xmm4}"(keys[11]), "{xmm5}"(keys[10]), "{xmm6}"(keys[9]),
-                    "{xmm7}"(keys[8]), "{xmm8}"(keys[7]), "{xmm9}"(keys[6]),
-                    "{xmm10}"(keys[5]), "{xmm11}"(keys[4]), "{xmm12}"(keys[3]),
-                    "{xmm13}"(keys[2]), "{xmm14}"(keys[1]), "{xmm15}"(keys[0])
-                :
-                : "intel", "alignstack"
-            );
+            d = xor(d, keys[14]);
+            d = intr::aesni_aesdec(d, keys[13]);
+            d = intr::aesni_aesdec(d, keys[12]);
+            d = intr::aesni_aesdec(d, keys[11]);
+            d = intr::aesni_aesdec(d, keys[10]);
+            d = intr::aesni_aesdec(d, keys[9]);
+            d = intr::aesni_aesdec(d, keys[8]);
+            d = intr::aesni_aesdec(d, keys[7]);
+            d = intr::aesni_aesdec(d, keys[6]);
+            d = intr::aesni_aesdec(d, keys[5]);
+            d = intr::aesni_aesdec(d, keys[4]);
+            d = intr::aesni_aesdec(d, keys[3]);
+            d = intr::aesni_aesdec(d, keys[2]);
+            d = intr::aesni_aesdec(d, keys[1]);
+            d = intr::aesni_aesdeclast(d, keys[0]);
         }
-        data.write(block);
+        d.write(block);
     }
 
     /// Encrypt in-place eight 128 bit blocks (1024 bits in total) using
@@ -62,31 +67,21 @@ impl Aes256 {
         let keys = self.decrypt_keys;
         let mut data = u64x2::read8(blocks);
         unsafe {
-            asm!(include_str!("decrypt8_1.asm")
-                :
-                    "+{xmm0}"(data[0]), "+{xmm1}"(data[1]), "+{xmm2}"(data[2]),
-                    "+{xmm3}"(data[3]), "+{xmm4}"(data[4]), "+{xmm5}"(data[5]),
-                    "+{xmm6}"(data[6]), "+{xmm7}"(data[7])
-                :
-                    "{xmm8}"(keys[14]), "{xmm9}"(keys[13]), "{xmm10}"(keys[12]),
-                    "{xmm11}"(keys[11]), "{xmm12}"(keys[10]), "{xmm13}"(keys[9]),
-                    "{xmm14}"(keys[8]), "{xmm15}"(keys[7])
-                :
-                : "intel", "alignstack"
-            );
-
-            asm!(include_str!("decrypt8_2.asm")
-                :
-                    "+{xmm0}"(data[0]), "+{xmm1}"(data[1]), "+{xmm2}"(data[2]),
-                    "+{xmm3}"(data[3]), "+{xmm4}"(data[4]), "+{xmm5}"(data[5]),
-                    "+{xmm6}"(data[6]), "+{xmm7}"(data[7])
-                :
-                    "{xmm9}"(keys[6]), "{xmm10}"(keys[5]), "{xmm11}"(keys[4]),
-                    "{xmm12}"(keys[3]), "{xmm13}"(keys[2]), "{xmm14}"(keys[1]),
-                    "{xmm15}"(keys[0])
-                :
-                : "intel", "alignstack"
-            );
+            round8!(xor, data, keys[14]);
+            round8!(intr::aesni_aesdec, data, keys[13]);
+            round8!(intr::aesni_aesdec, data, keys[12]);
+            round8!(intr::aesni_aesdec, data, keys[11]);
+            round8!(intr::aesni_aesdec, data, keys[10]);
+            round8!(intr::aesni_aesdec, data, keys[9]);
+            round8!(intr::aesni_aesdec, data, keys[8]);
+            round8!(intr::aesni_aesdec, data, keys[7]);
+            round8!(intr::aesni_aesdec, data, keys[6]);
+            round8!(intr::aesni_aesdec, data, keys[5]);
+            round8!(intr::aesni_aesdec, data, keys[4]);
+            round8!(intr::aesni_aesdec, data, keys[3]);
+            round8!(intr::aesni_aesdec, data, keys[2]);
+            round8!(intr::aesni_aesdec, data, keys[1]);
+            round8!(intr::aesni_aesdeclast, data, keys[0]);
         }
         u64x2::write8(data, blocks);
     }
@@ -94,50 +89,46 @@ impl Aes256 {
     #[inline(always)]
     pub(crate) fn encrypt_u64x2(&self, data: &mut u64x2) {
         let keys = self.encrypt_keys;
+        let mut d = *data;
         unsafe {
-            asm!(include_str!("encrypt.asm")
-                : "+{xmm0}"(*data)
-                :
-                    "{xmm1}"(keys[0]), "{xmm2}"(keys[1]), "{xmm3}"(keys[2]),
-                    "{xmm4}"(keys[3]), "{xmm5}"(keys[4]), "{xmm6}"(keys[5]),
-                    "{xmm7}"(keys[6]), "{xmm8}"(keys[7]), "{xmm9}"(keys[8]),
-                    "{xmm10}"(keys[9]), "{xmm11}"(keys[10]), "{xmm12}"(keys[11]),
-                    "{xmm13}"(keys[12]), "{xmm14}"(keys[13]), "{xmm15}"(keys[14])
-                :
-                : "intel", "alignstack"
-            );
+            d = xor(d, keys[0]);
+            d = intr::aesni_aesenc(d, keys[1]);
+            d = intr::aesni_aesenc(d, keys[2]);
+            d = intr::aesni_aesenc(d, keys[3]);
+            d = intr::aesni_aesenc(d, keys[4]);
+            d = intr::aesni_aesenc(d, keys[5]);
+            d = intr::aesni_aesenc(d, keys[6]);
+            d = intr::aesni_aesenc(d, keys[7]);
+            d = intr::aesni_aesenc(d, keys[8]);
+            d = intr::aesni_aesenc(d, keys[9]);
+            d = intr::aesni_aesenc(d, keys[10]);
+            d = intr::aesni_aesenc(d, keys[11]);
+            d = intr::aesni_aesenc(d, keys[12]);
+            d = intr::aesni_aesenc(d, keys[13]);
+            d = intr::aesni_aesenclast(d, keys[14]);
         }
+        *data = d;
     }
 
     #[inline(always)]
     pub(crate) fn encrypt_u64x2_8(&self, data: &mut [u64x2; 8]) {
         let keys = self.encrypt_keys;
         unsafe {
-            asm!(include_str!("encrypt8_1.asm")
-                :
-                    "+{xmm0}"(data[0]), "+{xmm1}"(data[1]), "+{xmm2}"(data[2]),
-                    "+{xmm3}"(data[3]), "+{xmm4}"(data[4]), "+{xmm5}"(data[5]),
-                    "+{xmm6}"(data[6]), "+{xmm7}"(data[7])
-                :
-                    "{xmm8}"(keys[0]), "{xmm9}"(keys[1]), "{xmm10}"(keys[2]),
-                    "{xmm11}"(keys[3]), "{xmm12}"(keys[4]), "{xmm13}"(keys[5]),
-                    "{xmm14}"(keys[6]), "{xmm15}"(keys[7])
-                :
-                : "intel", "alignstack"
-            );
-
-            asm!(include_str!("encrypt8_2.asm")
-                :
-                    "+{xmm0}"(data[0]), "+{xmm1}"(data[1]), "+{xmm2}"(data[2]),
-                    "+{xmm3}"(data[3]), "+{xmm4}"(data[4]), "+{xmm5}"(data[5]),
-                    "+{xmm6}"(data[6]), "+{xmm7}"(data[7])
-                :
-                    "{xmm9}"(keys[8]), "{xmm10}"(keys[9]), "{xmm11}"(keys[10]),
-                    "{xmm12}"(keys[11]), "{xmm13}"(keys[12]), "{xmm14}"(keys[13]),
-                    "{xmm15}"(keys[14])
-                :
-                : "intel", "alignstack"
-            );
+            round8!(xor, data, keys[0]);
+            round8!(intr::aesni_aesenc, data, keys[1]);
+            round8!(intr::aesni_aesenc, data, keys[2]);
+            round8!(intr::aesni_aesenc, data, keys[3]);
+            round8!(intr::aesni_aesenc, data, keys[4]);
+            round8!(intr::aesni_aesenc, data, keys[5]);
+            round8!(intr::aesni_aesenc, data, keys[6]);
+            round8!(intr::aesni_aesenc, data, keys[7]);
+            round8!(intr::aesni_aesenc, data, keys[8]);
+            round8!(intr::aesni_aesenc, data, keys[9]);
+            round8!(intr::aesni_aesenc, data, keys[10]);
+            round8!(intr::aesni_aesenc, data, keys[11]);
+            round8!(intr::aesni_aesenc, data, keys[12]);
+            round8!(intr::aesni_aesenc, data, keys[13]);
+            round8!(intr::aesni_aesenclast, data, keys[14]);
         }
     }
 }
